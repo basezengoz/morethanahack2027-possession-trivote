@@ -1,0 +1,14 @@
+# Fixed first local research run; no target match ground truth or model selection.
+seed: 2027
+channels: 128
+epochs: 1
+learning_rate: 0.001
+center_frames: 512
+context_frames: 256
+max_train_windows: 128
+tag_dropout: 0.5
+team_swap: 0.5
+missing_block_probability: 0.25
+missing_block_frames: 25
+train_games: ["1"]
+validation_games: ["2"]

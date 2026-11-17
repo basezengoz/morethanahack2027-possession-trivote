@@ -1,0 +1,31 @@
+# Initial heuristic assumptions; not fitted to public ground truth.
+quality:
+  max_gap_frames: 5
+  max_ball_speed_mps: 45.0
+features:
+  control_distance_m: 3.0
+  control_context_frames: 5
+  nearby_radius_m: 5.0
+  max_ball_speed_mps: 45.0
+  max_player_speed_mps: 12.0
+tagging:
+  edge_frames: 25
+teacher:
+  distance_scale_m: 3.0
+  distance_weight: 1.5
+  control_weight: 1.0
+  tag_weight: 0.35
+  dead_bias: -2.5
+  dead_weight: 5.0
+  slow_ball_mps: 1.0
+  slow_team_mps: 1.0
+  boundary_margin_m: 2.0
+decode:
+  takeover_cost: 4.0
+  stop_cost: 3.0
+  restart_cost: 3.0
+  change_discount: 1.0
+  stop_discount: 1.0
+  restart_discount: 1.0
+  score_floor: 1.0e-8
+published_dead_intervals: true

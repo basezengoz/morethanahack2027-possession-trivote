@@ -1,0 +1,7 @@
+# TCN ve kural tabanlı yöntem kanıtlarının önceden sabitlenmiş deneyi
+
+V4 checkpoint'i ve mevcut decoder sabittir; TCN H/A/D olasılıkları üzerine kural tabanlı yöntem pas alıcısı ve kaleci sahipliği için ayrı ayrı 0,5, çizgi/restart için D'ye 0,6 log-ağırlık eklenir. Kaleci yalnız takım kanıtıdır, canlı oyun veya D etiketi değildir. Kanıtlar zorunlu durum yaratmaz; geçiş kanıtları değiştirilmez. Pas pencereleri ve kural tabanlı yöntem özellikleri devre başına hesaplanır. Ağırlıklar önceki kural birleşimindeki araştırma önkabulleridir, public GT'den seçilmemiştir.
+
+TCN, pas, restart, kaleci ve üçü birlikte, ayrıca eğitilmiş TCN D başlığı yerine öğretmen D kanıtı kullanan TCN temel varyantı karşılaştırılır. Eğitim maçında değerlendirme engellenir. J03WOH geliştirmedir; J03WR9 önceki deneylerde görülmüş ayrı kontroldür, el değmemiş test değildir. Her maç temiz ve yalnız hedefin top gözlem maskesi aktarılmış koşulda aynı girdilerle değerlendirilir; DFL'de tag yoktur, kaleci roster ile eşlenir. DFL ve hedef maç semantikleri farklıdır.
+
+Aday seçimi: J03WOH temiz/maskeli spellF1 ortalamasında TCN temelini aşan, iki koşulun hiçbirinde temel TCN'den 0,02'den fazla gerilemeyen adaylar arasından en yüksek ortalama seçilir; eşitlikte TCN tercih edilir. Diğer metrikler ayrıca raporlanır. Seçimden sonra J03WR9 kontrolü yapılır; bağımsız genellenebilirlik ve final seçimi için yeterli değildir. Public GT kullanılmaz. Başka eğitim maçları bağımsız değerlendirme sayılamaz.

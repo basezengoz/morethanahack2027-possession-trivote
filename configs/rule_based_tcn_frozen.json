@@ -1,0 +1,14 @@
+{
+  "selected": "combined",
+  "development_checkpoint_sha256": "0750944c767aadbd8033660de1438fe8de54d5d1fec7df2c48b18f622d4919ed",
+  "development_report_sha256": "110032de5f6f33482907842c27e9680cf9f3244e22d1b4af784e4d86a51743d3",
+  "source_sha256": {
+    "scripts/evaluate_rule_based_tcn.py": "76d7a57a3175960ec55ebb4ea3349f6fd2e0a47b17cea50a07072f33a3b68be5",
+    "src/possession/rule_based_tcn_evidence.py": "024f6ea5c72f647fe3ac2fc73b2f33c1fd734d16dc05e0fb1468a1ef11a7fe6f",
+    "src/possession/rule_based/model.py": "86dd6ca1e73f4b1847a524d7cfa18c16d9770802860a1ef01db2f0ee12176656",
+    "src/possession/rule_based/dead_ball.py": "a754486db9656fae7db68a85729b910acb65a13b089ada9779559bb89829d99c",
+    "scripts/compare_rule_methods.py": "3785f4a485a95144a1aa01fb215aef1164922b50b26b042c9031b39c5026e771",
+    "configs/rules.yaml": "e3548811d5c29be2c1555d8103ac1bc6abf02453359623ab12e0ae616c3e98dd",
+    "docs/rule_based_tcn_experiment.md": "2f1d433d126a61fde533d2fea8837eafcdabd34af8aecb63dac1296bff277be4"
+  }
+}
