@@ -1,4 +1,4 @@
-# Trivote — Ball possession on the tactical feed
+# Trivote: Ball possession on the tactical feed
 
 Technical document for More than a Hack 2027, Phase 1. The submission labels every frame of the
 Barcelona–Athletic tactical video (199,319 frames, 25 fps) as `H`, `A`, `D` or `X`.
@@ -42,7 +42,7 @@ are the constants in `dead_ball.py` and `model.py`; they are physical or footbal
 down before any scoring, and none was fitted to labels. The two TCN cues of §1.2 enter at exactly
 two points, marked **[TCN]**.
 
-**Step 0 — Load and align** (`loader.py`, `dead_ball.ball_track`)
+**Step 0: Load and align** (`loader.py`, `dead_ball.ball_track`)
 
 - ATD rows are read in order and every `frame_id` is checked: `video_frame = frame_id − 1`.
 - The graded halves come from `games.half_video_blocks()`. Frames outside them are never decoded.
@@ -50,7 +50,7 @@ two points, marked **[TCN]**.
 - Within each half, ball gaps of up to 10 frames (0.4 s) are interpolated linearly. Longer gaps
   stay missing. Ball speed is computed in m/s from this track.
 
-**Step 1 — Per-frame features** (`dead_ball.features`)
+**Step 1: Per-frame features** (`dead_ball.features`)
 
 | Feature | Definition |
 |---|---|
@@ -64,7 +64,7 @@ two points, marked **[TCN]**.
 | set-piece tag | Each Smart Tagging SET PIECES instance is checked against the tracking. Weight 1.0 if the ball is put down on a matching spot, 0.5 if no rest is seen, ignored if the ball rests on a different kind of spot. |
 | kickoff formation | At least 8 tracked outfield players of each team, all in their own half (1 m tolerance), for at least 1 s. The last 1 s of each run carries no evidence, because the kick happens there. |
 
-**Step 2 — Dead-ball evidence** (`dead_ball.evidence_terms`)
+**Step 2: Dead-ball evidence** (`dead_ball.evidence_terms`)
 
 Each frame gets a dead-vs-live log-odds score: the sum of the terms below. A positive score means
 the frame looks dead.
@@ -82,7 +82,7 @@ the frame looks dead.
 | kickoff | +3.0 | Kickoff formation. |
 | **[TCN]** dead cue | `0.25 · clip(log(pD/(1 − pD)), ±2)`, so at most ±0.5 | Only on frames where the raw ball is observed. |
 
-**Step 3 — Decide dead or live** (`dead_ball.detect_dead`, once per half)
+**Step 3: Decide dead or live** (`dead_ball.detect_dead`, once per half)
 
 1. **Viterbi.** A two-state (live/dead) Viterbi decodes the scores, paying 30 log-odds per switch.
    A stoppage therefore needs sustained evidence, not one dead-looking frame.
@@ -112,7 +112,7 @@ the frame looks dead.
 9. **Minimum length.** Dead runs shorter than 3 s are returned to live play, except the forced
    stretch before a kickoff.
 
-**Step 4 — Decide who has possession** (`model.build_labels`, once per live spell)
+**Step 4: Decide who has possession** (`model.build_labels`, once per live spell)
 
 Each maximal live run between two stoppages is a *spell*. The spell is decoded on its own; no
 possession crosses a stoppage.
@@ -156,7 +156,7 @@ possession crosses a stoppage.
    *tracking* evidence (control plus passes, ≥ 0.1) points to it. Tags and the TCN cue do not move
    a change. Until that frame, a loose or unseen ball stays with the old team.
 
-**Step 5 — Write the labels** (`model.build_labels`, `predict.apply_published_dead_intervals`)
+**Step 5: Write the labels** (`model.build_labels`, `predict.apply_published_dead_intervals`)
 
 | Frame | Label |
 |---|---|
