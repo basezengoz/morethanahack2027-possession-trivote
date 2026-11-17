@@ -36,45 +36,134 @@ therefore used as a capped extra vote inside the rule decoders, not as the decod
 
 ### 1.1 Rule-based core (`src/possession/rule_based/`)
 
-**Dead ball** (`dead_ball.py`). Several weak signals are summed into a per-frame dead/live
-log-likelihood ratio, then decoded with a two-state Viterbi and a switching cost:
+The rule-based system turns every graded frame into a label in five steps. The steps run in
+the order below, and each later step can only use what the earlier ones produced. All thresholds
+are the constants in `dead_ball.py` and `model.py`; they are physical or football priors, written
+down before any scoring, and none was fitted to labels. The two TCN cues of §1.2 enter at exactly
+two points, marked **[TCN]**.
 
-- **Signals pointing to dead ball:** collective outfield speed (players walk after a whistle), ball
-  beyond the lines (with a tighter margin on the near touchline, because a ball in the air projects
-  away from the camera), missing ball (weak), validated Smart Tagging set-piece starts, and the
-  kickoff formation.
-- **Signals pointing to live play:** fast ball inside the pitch, a dribble (carrying pace with no
-  close opponent), and chains of two or more passes by one team.
-- **Rules applied on top of the decoder:**
-  - Strong triggers (ball out, a set-piece tag) protect a stoppage.
-  - Each half starts with a kickoff.
-  - A validated goal is dead until the kickoff.
-  - A ball resting on a Laws-defined restart spot (goal area, corner arc, touchline, penalty spot,
-    centre spot), with opponents where the Laws put them, is a stoppage until it leaves the spot.
-  - An out-of-play stoppage starts at the frame the ball crosses the line.
-  - Play resumes only when the ball is played.
-  - The minimum stoppage length is `MIN_STOP_S`.
+**Step 0 — Load and align** (`loader.py`, `dead_ball.ball_track`)
 
-**Possession** (`model.py`), decoded separately within each live spell:
+- ATD rows are read in order and every `frame_id` is checked: `video_frame = frame_id − 1`.
+- The graded halves come from `games.half_video_blocks()`. Frames outside them are never decoded.
+- Normalised coordinates are scaled to metres with the pitch size in `games.py`.
+- Within each half, ball gaps of up to 10 frames (0.4 s) are interpolated linearly. Longer gaps
+  stay missing. Ball speed is computed in m/s from this track.
 
-- **Control evidence (signed H/A).** Distance of the nearest player: full weight within 1.5 m, none
-  beyond 4 m. Separation from the nearest opponent: none in a duel. A ball-speed gate: full weight up
-  to 5 m/s, none from 10 m/s, because a pass, a shot or a deflection is not control.
-- **Passes.** Each completed pass gives the passing team half the switching cost. On their own,
-  more than two consecutive passes by the other team change possession.
-- **Goalkeeper.** A keeper with the ball in his own area counts as control, with no speed gate.
-- **Smart Tagging.** Its ball side is weak evidence: each contiguous tag run adds 12 units in total,
-  below the switching cost of 25. A tag can tip an open decision but cannot force one.
-- **Restart rule.** Every live spell starts with the team that restarts it. This is the team of the
-  player nearest the ball at release. If that is not available, the team of a set-piece tag
-  belonging to this restart is used. If neither is available, the team of the first nearby
-  sightings is used.
-- **Decoding.** A two-state Viterbi with switching cost 25 needs about 1 s of clear control by the
-  other team to change possession. Each change is then moved forward to the new team's first frame
-  of control evidence, so a loose or unseen ball stays with the last team.
+**Step 1 — Per-frame features** (`dead_ball.features`)
 
-All constants are physical or football priors written down before any scoring. None was fitted to
-labels.
+| Feature | Definition |
+|---|---|
+| `d_home`, `d_away` | Distance from the ball to the nearest tracked player of each team. A "goalkeeper" track standing in the other team's penalty area is given to the team defending that goal, because the tracker swaps identities. |
+| collective speed | Mean speed of tracked outfield players, smoothed over 1 s. |
+| ball out | Ball beyond the lines for at least 5 frames. The margin is 0.5 m on the near touchline and 1.5 m elsewhere, because a ball in the air is projected away from the camera. |
+| dribble | Ball inside the pitch at 2–8 m/s, a player within 1.5 m, and the nearest opponent at least 1 m further away. |
+| pass | The ball leaves a player's touch (≤ 1.5 m) and is next touched by a team-mate at least 5 m away within 3 s. A ball-out or a set-piece start in between breaks it. |
+| pass chain | Two or more consecutive passes by one team. |
+| keeper | A goalkeeper with the ball in his own penalty area that he got in play: no ball-out in the 3 s before. For a ball gap that ends with the ball reappearing at him, the whole gap counts as his. |
+| set-piece tag | Each Smart Tagging SET PIECES instance is checked against the tracking. Weight 1.0 if the ball is put down on a matching spot, 0.5 if no rest is seen, ignored if the ball rests on a different kind of spot. |
+| kickoff formation | At least 8 tracked outfield players of each team, all in their own half (1 m tolerance), for at least 1 s. The last 1 s of each run carries no evidence, because the kick happens there. |
+
+**Step 2 — Dead-ball evidence** (`dead_ball.evidence_terms`)
+
+Each frame gets a dead-vs-live log-odds score: the sum of the terms below. A positive score means
+the frame looks dead.
+
+| Term | Log-odds | When |
+|---|---|---|
+| speed | `clip(1.5 · (1.6 − v̄), −2, +2)` | Always. Players walk (v̄ < 1.6 m/s) after a whistle. |
+| out | +3.0 | Ball out (Step 1). |
+| missing | +0.3 | Ball not seen. Weak, because the ball is also lost in live play. |
+| fast | −1.0 | Ball inside the pitch faster than 8 m/s: a pass or a shot. |
+| dribble | −0.8 | Dribble (Step 1). |
+| chain | −2.0 | Pass chain (Step 1). |
+| keeper | cancels the positive part of *speed* and *missing* | Keeper frames: a ball in his hands is not missing, and a team waiting for his release is not walking because play stopped. |
+| set piece | +1.0 (or +0.5) | From 4 s before to 2 s after a validated tag start. |
+| kickoff | +3.0 | Kickoff formation. |
+| **[TCN]** dead cue | `0.25 · clip(log(pD/(1 − pD)), ±2)`, so at most ±0.5 | Only on frames where the raw ball is observed. |
+
+**Step 3 — Decide dead or live** (`dead_ball.detect_dead`, once per half)
+
+1. **Viterbi.** A two-state (live/dead) Viterbi decodes the scores, paying 30 log-odds per switch.
+   A stoppage therefore needs sustained evidence, not one dead-looking frame.
+2. **Protected stoppages.** A second Viterbi runs without the play terms (dribble, chain, keeper).
+   If it finds a stoppage within 2 s of a strong trigger (ball out, or a validated set-piece start)
+   that the first pass erased entirely, that stoppage is restored. Play evidence may shorten a
+   throw-in or a goal kick, but cannot erase it.
+3. **Kickoff.** Every frame of a half before its first kickoff formation is dead.
+4. **Ball-out timing.** If the ball goes out within 5 s of a decoded stoppage start, the start moves
+   to the frame the ball crossed the line.
+5. **Goals.** A GOALS tag counts only if a kickoff formation ends within 10 s of the tag's end and
+   the kicker is within 2 m of the centre spot. A drinks break also puts every player in his own
+   half, but nobody stands on the centre spot. The frames from the last shot at that goal (within
+   25 m, at 8 m/s or faster, towards the goal) to the kickoff are dead.
+6. **Restart spots.** The ball rests (slower than 1 m/s for at least 1 s) on a spot where the Laws
+   restart play, with 1.5 m tolerance: the goal area, a corner arc, a touchline band of ±2 m, a
+   penalty spot or the centre spot. The opponents must be where the Laws put them: 9.15 m away, or
+   2 m at a throw-in, minus 1.5 m tolerance. Then the frames are dead from the ball's last contact
+   with the relevant line, provided no play happened since (looking back at most 300 s), until the
+   ball leaves the spot.
+7. **Wait for the restart.** After a protected stoppage, if the ball comes to rest for 0.5 s within
+   30 s of the decoded end, before any play evidence, the stoppage lasts until the ball departs. A
+   ball carried back by hand is not a restart.
+8. **Wait for the ball to move.** If the ball sits still at the end of a stoppage (seen on at least
+   60% of the last 1 s, never more than 0.5 m from its spot), the stoppage lasts until the ball is
+   more than 0.5 m away, for at most 30 s.
+9. **Minimum length.** Dead runs shorter than 3 s are returned to live play, except the forced
+   stretch before a kickoff.
+
+**Step 4 — Decide who has possession** (`model.build_labels`, once per live spell)
+
+Each maximal live run between two stoppages is a *spell*. The spell is decoded on its own; no
+possession crosses a stoppage.
+
+1. **Signed evidence per frame** (+ home, − away). These are summed:
+   - **control:** `near · sep · gate`, signed towards the team of the nearest player, where
+     - `near = clip((4 − d_min) / 2.5, 0, 1)`: full weight within 1.5 m, none beyond 4 m;
+     - `sep = clip((d_other − d_min) / 2, 0, 1)`: zero in a duel, full when the opponent is 2 m
+       further away;
+     - `gate = clip((10 − v_ball) / 5, 0, 1)`: full weight up to 5 m/s, none from 10 m/s, so a
+       pass, shot, clearance or deflection is not control.
+   - **keeper:** on keeper frames, ±1.5 for the keeper's team replaces *control*, with no speed
+     gate. Catching a fast ball is control.
+   - **pass:** ±12.5 (half the switching cost) for the passing team at each completed pass's
+     reception.
+   - **Smart Tagging:** ATTACKING/DEFENDING tags with a known ball side give a per-frame side. A
+     mirrored pair counts once; conflicting sides give zero. Each contiguous run adds 12 in total,
+     spread evenly over its frames: below the switching cost, so a tag can tip a decision but never
+     force one.
+   - **[TCN]** **team cue:** `0.25 · clip(log(pH/pA), ±2) · (1 − pD)`, so at most ±0.5 per frame,
+     and only where the raw ball is observed.
+2. **Restarting team.** The first source that applies decides:
+   1. The *release frame* is the last frame the ball is at rest before it moves, searched from
+      1 s before the spell to 3 s into it. If a player is within 3 m of the ball there, his team
+      restarts. At release the nearest player is the taker; a wall or a marker does not decide.
+   2. Otherwise, a validated (not contradicted) set-piece tag with a known team that starts inside
+      the stoppage ending here, or within 5 s of the restart, decides. The latest such tag wins.
+      After a confirmed goal, the conceding team restarts.
+   3. Otherwise, the first 10 sightings of a player within 3 m vote by majority. They are taken
+      from 1 s before the spell until the ball first reaches 10 m/s, because the players a long
+      kick flies past are receivers, not the taker. If there are none, the first 3 s of the spell
+      are used instead.
+   4. Otherwise there is no prior.
+
+   The restarting team gets +50 (twice the switching cost) at the spell's first frame.
+3. **Viterbi.** A two-state (H/A) Viterbi decodes the summed evidence, paying 25 per change. A
+   change needs about 1 s of clear, uncontested control by the other team, more than two
+   consecutive passes, or a keeper holding the ball.
+4. **Snapping.** In a stretch without evidence, the Viterbi would place a change right after the old
+   team's last touch. So each change is moved forward to the new team's first frame whose
+   *tracking* evidence (control plus passes, ≥ 0.1) points to it. Tags and the TCN cue do not move
+   a change. Until that frame, a loose or unseen ball stays with the old team.
+
+**Step 5 — Write the labels** (`model.build_labels`, `predict.apply_published_dead_intervals`)
+
+| Frame | Label |
+|---|---|
+| graded and dead | `D` |
+| graded and live | `H` or `A`, from Step 4 |
+| not graded | `X` |
+| the published second-half pre-kickoff interval `[110808, 113742)` | `D`, overriding the above |
 
 ### 1.2 TCN evidence (`src/possession/model_v2.py`, `src/possession/rule_based_tcn_evidence.py`)
 
